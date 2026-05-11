@@ -1,0 +1,11 @@
+{
+  "target": "asset",
+  "mode": "single",
+  "prompt": "sneaky farm fox enemy, side view, russet orange fur, cream chest, dark paws, bushy tail",
+  "role": "",
+  "input": "/Users/jorgealonso/.codex/generated_images/019e17ca-1c6b-79e1-a572-d6f8dfa59bb2/ig_056e938ce897f149016a01ffce1a2881919988909aef95fec0.png",
+  "threshold": 100,
+  "edge_threshold": 150,
+  "duration": 200,
+  "single_size": 256
+}

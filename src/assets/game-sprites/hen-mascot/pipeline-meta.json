@@ -1,0 +1,11 @@
+{
+  "target": "asset",
+  "mode": "single",
+  "prompt": "friendly farm hen mascot, full body, 3/4 view, warm barnyard style, cream feathers with a bright red comb",
+  "role": "",
+  "input": "/Users/jorgealonso/.codex/generated_images/019e17ca-1c6b-79e1-a572-d6f8dfa59bb2/ig_056e938ce897f149016a01ff853c7c81919c3cb1674beb20a5.png",
+  "threshold": 100,
+  "edge_threshold": 150,
+  "duration": 200,
+  "single_size": 256
+}
