@@ -1,23 +1,30 @@
 import '../css/main.css';
-import foxSprite from '../assets/game-sprites/fox/clean.png';
+import bigHenSheet from '../assets/game-sprites/big-hen/sheet-transparent.png';
+import chickSheet from '../assets/game-sprites/chick/sheet-transparent.png';
+import eggSheet from '../assets/game-sprites/egg/sheet-transparent.png';
+import elderHenSheet from '../assets/game-sprites/elder-hen/sheet-transparent.png';
+import foxRunSheet from '../assets/game-sprites/fox-run/sheet-transparent.png';
+import henSheet from '../assets/game-sprites/hen/sheet-transparent.png';
 import henMascotSprite from '../assets/game-sprites/hen-mascot/clean.png';
+import queenHenSheet from '../assets/game-sprites/queen-hen/sheet-transparent.png';
 
 const app = document.querySelector('#app');
+const STORAGE_KEY = 'corral-gallinas-records-v1';
 
 const EVOLUTION_CHAIN = [
-  { key: 'egg', label: 'Huevo', badge: 'E', score: 5, accent: '#fff3d1' },
-  { key: 'chick', label: 'Pollito', badge: 'P', score: 12, accent: '#ffe066' },
-  { key: 'hen', label: 'Gallina', badge: 'G', score: 30, accent: '#ffd7a2' },
-  { key: 'bigHen', label: 'Gallina grande', badge: 'GG', score: 65, accent: '#ffb870' },
-  { key: 'queen', label: 'Gallina reina', badge: 'R', score: 140, accent: '#ffd36e' },
-  { key: 'elder', label: 'Gallina anciana', badge: 'A', score: 300, accent: '#d7dbe8' },
+  { key: 'egg', label: 'Huevo', badge: 'E', score: 5, accent: '#fff3d1', sprite: eggSheet },
+  { key: 'chick', label: 'Pollito', badge: 'P', score: 12, accent: '#ffe066', sprite: chickSheet },
+  { key: 'hen', label: 'Gallina', badge: 'G', score: 30, accent: '#ffd7a2', sprite: henSheet },
+  { key: 'bigHen', label: 'Gallina grande', badge: 'GG', score: 65, accent: '#ffb870', sprite: bigHenSheet },
+  { key: 'queen', label: 'Gallina reina', badge: 'R', score: 140, accent: '#ffd36e', sprite: queenHenSheet },
+  { key: 'elder', label: 'Gallina anciana', badge: 'A', score: 300, accent: '#d7dbe8', sprite: elderHenSheet },
 ];
 
 const COLOR_VARIANTS = [
-  { key: 'white', label: 'Blanco', shell: '#f7f2df', stroke: '#cfbea0', comb: '#d94b5a' },
-  { key: 'brown', label: 'Marron', shell: '#a8673f', stroke: '#724326', comb: '#d0414f' },
-  { key: 'black', label: 'Negro', shell: '#36343f', stroke: '#18161d', comb: '#d14d5a' },
-  { key: 'gray', label: 'Gris', shell: '#8e98aa', stroke: '#5c6370', comb: '#cb5660' },
+  { key: 'white', label: 'Blanco', shell: '#f7f2df', stroke: '#cfbea0', comb: '#d94b5a', row: 0 },
+  { key: 'brown', label: 'Marron', shell: '#a8673f', stroke: '#724326', comb: '#d0414f', row: 1 },
+  { key: 'black', label: 'Negro', shell: '#36343f', stroke: '#18161d', comb: '#d14d5a', row: 2 },
+  { key: 'gray', label: 'Gris', shell: '#8e98aa', stroke: '#5c6370', comb: '#cb5660', row: 3 },
 ];
 
 const MODES = {
@@ -57,17 +64,72 @@ const state = {
   message: 'Une dos animales del mismo color y la misma etapa.',
   aboutOpen: false,
   gameOver: null,
+  rope: null,
+  effects: [],
+  paused: false,
+  pausedAt: null,
+  foxPausedLeft: null,
+  warningPausedLeft: null,
+  combo: 0,
+  comboUntil: null,
+  records: loadRecords(),
 };
+
+function loadRecords() {
+  try {
+    const saved = window.localStorage.getItem(STORAGE_KEY);
+    if (!saved) {
+      return {};
+    }
+    return JSON.parse(saved);
+  } catch {
+    return {};
+  }
+}
+
+function saveRecords() {
+  try {
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state.records));
+  } catch {
+    // Storage may be unavailable in private browsing; the run should still work.
+  }
+}
 
 function randomFrom(list) {
   return list[Math.floor(Math.random() * list.length)];
 }
 
-function createAnimal(level = 0, colorKey = randomFrom(COLOR_VARIANTS).key) {
+function randomPosition() {
+  return {
+    x: 8 + Math.random() * 78,
+    y: 18 + Math.random() * 66,
+  };
+}
+
+function movementFor(level) {
+  if (level === 0) {
+    return { vx: 0, vy: 0 };
+  }
+
+  const speed = 0.22 + Math.min(level, 5) * 0.045;
+  const angle = Math.random() * Math.PI * 2;
+  return {
+    vx: Math.cos(angle) * speed,
+    vy: Math.sin(angle) * speed,
+  };
+}
+
+function createAnimal(level = 0, colorKey = randomFrom(COLOR_VARIANTS).key, position = randomPosition()) {
+  const velocity = movementFor(level);
   return {
     id: state.nextId++,
     level,
     colorKey,
+    x: position.x,
+    y: position.y,
+    vx: velocity.vx,
+    vy: velocity.vy,
+    bornAt: performance.now(),
   };
 }
 
@@ -79,8 +141,34 @@ function getStage(level) {
   return EVOLUTION_CHAIN[Math.min(level, EVOLUTION_CHAIN.length - 1)];
 }
 
+function spriteRowPosition(color) {
+  return `${color.row * 33.3333}%`;
+}
+
 function currentMode() {
   return state.selectedMode ? MODES[state.selectedMode] : null;
+}
+
+function currentRecord() {
+  if (!state.selectedMode) {
+    return 0;
+  }
+  return state.records[state.selectedMode]?.score ?? 0;
+}
+
+function updateRecordIfNeeded() {
+  if (!state.selectedMode || state.score <= currentRecord()) {
+    return false;
+  }
+
+  state.records[state.selectedMode] = {
+    score: state.score,
+    merges: state.merges,
+    bestStage: state.bestStage,
+    savedAt: new Date().toISOString(),
+  };
+  saveRecords();
+  return true;
 }
 
 function startGame(modeKey) {
@@ -104,9 +192,17 @@ function startGame(modeKey) {
   state.warningStartedAt = null;
   state.message = 'Han salido las primeras gallinas. Junta iguales para hacerlas crecer.';
   state.gameOver = null;
+  state.rope = null;
+  state.effects = [];
+  state.paused = false;
+  state.pausedAt = null;
+  state.foxPausedLeft = null;
+  state.warningPausedLeft = null;
+  state.combo = 0;
+  state.comboUntil = null;
   scheduleSpawn();
   scheduleFox();
-  state.tickerHandle = window.setInterval(tick, 100);
+  state.tickerHandle = window.setInterval(tick, 80);
   render();
 }
 
@@ -126,7 +222,7 @@ function clearLoopHandles() {
 }
 
 function scheduleSpawn() {
-  if (!state.running) {
+  if (!state.running || state.paused) {
     return;
   }
   const delay = 1500 + Math.random() * 1800;
@@ -137,7 +233,7 @@ function scheduleSpawn() {
 }
 
 function scheduleFox() {
-  if (!state.running) {
+  if (!state.running || state.paused) {
     return;
   }
   const delay = 8500 + Math.random() * 6500;
@@ -190,6 +286,7 @@ function scareFox() {
   }
   state.fox = null;
   state.score += 20;
+  updateRecordIfNeeded();
   state.message = 'Has espantado al zorro. El corral respira tranquilo un momento.';
   scheduleFox();
   render();
@@ -201,6 +298,7 @@ function resolveFoxSteal() {
     const victim = randomFrom(stealable);
     state.items = state.items.filter((item) => item.id !== victim.id);
     state.foxEscaped += 1;
+    state.selectedId = state.selectedId === victim.id ? null : state.selectedId;
     state.message = `El zorro se ha llevado una ${getStage(victim.level).label.toLowerCase()} ${getColor(victim.colorKey).label.toLowerCase()}.`;
   } else {
     state.message = 'El zorro no ha encontrado ninguna gallina que robar y se ha marchado.';
@@ -212,9 +310,13 @@ function resolveFoxSteal() {
 }
 
 function tick() {
-  if (!state.running) {
+  if (!state.running || state.paused) {
     return;
   }
+
+  updateAnimalMovement();
+  const effectsChanged = cleanupTemporaryEffects();
+  syncComboState();
 
   if (state.fox && performance.now() >= state.fox.leaveAt) {
     resolveFoxSteal();
@@ -222,7 +324,88 @@ function tick() {
   }
 
   syncWarningState();
+  if (effectsChanged) {
+    render();
+    return;
+  }
+
+  updateSceneActors();
   renderHudOnly();
+}
+
+function syncComboState() {
+  if (state.comboUntil && performance.now() > state.comboUntil) {
+    state.combo = 0;
+    state.comboUntil = null;
+  }
+}
+
+function updateAnimalMovement() {
+  state.items = state.items.map((item) => {
+    if (item.level === 0) {
+      return item;
+    }
+
+    let nextX = item.x + item.vx;
+    let nextY = item.y + item.vy;
+    let nextVx = item.vx;
+    let nextVy = item.vy;
+
+    if (nextX < 5 || nextX > 88) {
+      nextVx *= -1;
+      nextX = Math.max(5, Math.min(88, nextX));
+    }
+
+    if (nextY < 17 || nextY > 80) {
+      nextVy *= -1;
+      nextY = Math.max(17, Math.min(80, nextY));
+    }
+
+    if (Math.random() < 0.012) {
+      const turn = (Math.random() - 0.5) * 0.22;
+      const cos = Math.cos(turn);
+      const sin = Math.sin(turn);
+      const vx = nextVx * cos - nextVy * sin;
+      const vy = nextVx * sin + nextVy * cos;
+      nextVx = vx;
+      nextVy = vy;
+    }
+
+    return {
+      ...item,
+      x: nextX,
+      y: nextY,
+      vx: nextVx,
+      vy: nextVy,
+    };
+  });
+}
+
+function cleanupTemporaryEffects() {
+  const now = performance.now();
+  let changed = false;
+  if (state.rope && state.rope.until <= now) {
+    state.rope = null;
+    changed = true;
+  }
+  const nextEffects = state.effects.filter((effect) => effect.until > now);
+  if (nextEffects.length !== state.effects.length) {
+    state.effects = nextEffects;
+    changed = true;
+  }
+  return changed;
+}
+
+function updateSceneActors() {
+  state.items.forEach((item) => {
+    const node = document.querySelector(`[data-animal-id="${item.id}"]`);
+    if (!node) {
+      return;
+    }
+    node.style.left = `${item.x}%`;
+    node.style.top = `${item.y}%`;
+    node.classList.toggle('coop__animal--left', item.vx < 0);
+  });
 }
 
 function syncWarningState() {
@@ -254,11 +437,62 @@ function syncWarningState() {
 
 function endGame(reason) {
   state.running = false;
+  updateRecordIfNeeded();
   state.gameOver = reason;
   state.screen = 'gameover';
   state.fox = null;
+  state.rope = null;
+  state.effects = [];
+  state.paused = false;
   clearLoopHandles();
   render();
+}
+
+function pauseGame() {
+  if (!state.running || state.paused) {
+    return;
+  }
+
+  state.paused = true;
+  state.pausedAt = performance.now();
+  state.foxPausedLeft = state.fox ? Math.max(0, state.fox.leaveAt - state.pausedAt) : null;
+  state.warningPausedLeft = state.timeLeft;
+  clearLoopHandles();
+  state.message = 'Partida en pausa.';
+  render();
+}
+
+function resumeGame() {
+  if (!state.running || !state.paused) {
+    return;
+  }
+
+  const now = performance.now();
+  const mode = currentMode();
+  if (state.fox && state.foxPausedLeft !== null) {
+    state.fox.leaveAt = now + state.foxPausedLeft;
+  }
+  if (mode?.warningSeconds && state.warningPausedLeft !== null) {
+    state.warningStartedAt = now - (mode.warningSeconds - state.warningPausedLeft) * 1000;
+  }
+
+  state.paused = false;
+  state.pausedAt = null;
+  state.foxPausedLeft = null;
+  state.warningPausedLeft = null;
+  state.message = 'La partida continua.';
+  scheduleSpawn();
+  scheduleFox();
+  state.tickerHandle = window.setInterval(tick, 80);
+  render();
+}
+
+function togglePause() {
+  if (state.paused) {
+    resumeGame();
+  } else {
+    pauseGame();
+  }
 }
 
 function chooseAnimal(id) {
@@ -272,6 +506,7 @@ function chooseAnimal(id) {
 
   if (state.selectedId === id) {
     state.selectedId = null;
+    state.rope = null;
     state.message = 'Seleccion cancelada.';
     render();
     return;
@@ -291,6 +526,8 @@ function chooseAnimal(id) {
     return;
   }
 
+  showRope(first, item, canMerge(first, item));
+
   if (canMerge(first, item)) {
     mergeAnimals(first.id, item.id);
     return;
@@ -305,6 +542,15 @@ function canMerge(a, b) {
   return a.id !== b.id && a.colorKey === b.colorKey && a.level === b.level && a.level < EVOLUTION_CHAIN.length - 1;
 }
 
+function showRope(from, to, isValid) {
+  state.rope = {
+    from: { x: from.x, y: from.y },
+    to: { x: to.x, y: to.y },
+    valid: isValid,
+    until: performance.now() + (isValid ? 700 : 420),
+  };
+}
+
 function mergeAnimals(firstId, secondId) {
   const first = state.items.find((animal) => animal.id === firstId);
   const second = state.items.find((animal) => animal.id === secondId);
@@ -316,14 +562,31 @@ function mergeAnimals(firstId, secondId) {
     return;
   }
 
-  const upgraded = createAnimal(first.level + 1, first.colorKey);
+  const midpoint = {
+    x: (first.x + second.x) / 2,
+    y: (first.y + second.y) / 2,
+  };
+  const upgraded = createAnimal(first.level + 1, first.colorKey, midpoint);
   state.items = state.items.filter((animal) => animal.id !== firstId && animal.id !== secondId);
   state.items.unshift(upgraded);
   state.selectedId = null;
-  state.score += getStage(upgraded.level).score;
+  const now = performance.now();
+  state.combo = state.comboUntil && now < state.comboUntil ? state.combo + 1 : 1;
+  state.comboUntil = now + 3600;
+  const comboBonus = Math.max(0, state.combo - 1) * 8;
+  state.score += getStage(upgraded.level).score + comboBonus;
   state.merges += 1;
   state.bestStage = Math.max(state.bestStage, upgraded.level);
-  state.message = `${describeAnimal(first)} y ${describeAnimal(second)} se convierten en ${describeAnimal(upgraded)}.`;
+  updateRecordIfNeeded();
+  state.effects.push({
+    id: `merge-${upgraded.id}-${Date.now()}`,
+    x: midpoint.x,
+    y: midpoint.y,
+    colorKey: upgraded.colorKey,
+    label: getStage(upgraded.level).label,
+    until: performance.now() + 820,
+  });
+  state.message = `${describeAnimal(first)} y ${describeAnimal(second)} se convierten en ${describeAnimal(upgraded)}${comboBonus ? ` con combo +${comboBonus}` : ''}.`;
   syncWarningState();
   render();
 }
@@ -333,6 +596,7 @@ function describeAnimal(item) {
 }
 
 function goToMenu() {
+  updateRecordIfNeeded();
   clearLoopHandles();
   state.running = false;
   state.screen = 'menu';
@@ -341,6 +605,9 @@ function goToMenu() {
   state.fox = null;
   state.warningStartedAt = null;
   state.timeLeft = null;
+  state.rope = null;
+  state.effects = [];
+  state.paused = false;
   render();
 }
 
@@ -359,10 +626,12 @@ function renderHudOnly() {
   const merges = document.querySelector('[data-ui="merges"]');
   const population = document.querySelector('[data-ui="population"]');
   const best = document.querySelector('[data-ui="best"]');
+  const record = document.querySelector('[data-ui="record"]');
+  const combo = document.querySelector('[data-ui="combo"]');
   const warning = document.querySelector('[data-ui="warning"]');
   const fox = document.querySelector('[data-ui="fox"]');
 
-  if (!score || !merges || !population || !best || !warning || !fox) {
+  if (!score || !merges || !population || !best || !record || !combo || !warning || !fox) {
     return;
   }
 
@@ -370,6 +639,8 @@ function renderHudOnly() {
   merges.textContent = String(state.merges);
   population.textContent = String(state.items.length);
   best.textContent = getStage(state.bestStage).label;
+  record.textContent = String(currentRecord());
+  combo.textContent = state.combo > 1 ? `x${state.combo}` : '-';
   fox.textContent = String(state.foxEscaped);
 
   if (state.timeLeft === null) {
@@ -381,105 +652,90 @@ function renderHudOnly() {
   }
 }
 
-function stageMarkup(level, color) {
-  const fill = color.shell;
-  const stroke = color.stroke;
-  const comb = color.comb;
-
-  if (level === 0) {
-    return `
-      <svg viewBox="0 0 100 100" aria-hidden="true">
-        <ellipse cx="50" cy="56" rx="26" ry="34" fill="${fill}" stroke="${stroke}" stroke-width="6" />
-        <ellipse cx="41" cy="42" rx="5" ry="7" fill="#fff8ef" opacity="0.8" />
-      </svg>
-    `;
-  }
-
-  if (level === 1) {
-    return `
-      <svg viewBox="0 0 100 100" aria-hidden="true">
-        <circle cx="47" cy="56" r="21" fill="${fill}" stroke="${stroke}" stroke-width="5" />
-        <circle cx="66" cy="42" r="12" fill="${fill}" stroke="${stroke}" stroke-width="5" />
-        <polygon points="76,42 88,46 76,50" fill="#f3ab36" />
-        <circle cx="67" cy="40" r="2.7" fill="#24150f" />
-        <path d="M41 76 L38 91 M57 76 L54 91" stroke="#d08a30" stroke-width="5" stroke-linecap="round" />
-      </svg>
-    `;
-  }
-
-  if (level === 2) {
-    return `
-      <svg viewBox="0 0 100 100" aria-hidden="true">
-        <ellipse cx="45" cy="59" rx="24" ry="21" fill="${fill}" stroke="${stroke}" stroke-width="5" />
-        <circle cx="69" cy="44" r="13" fill="${fill}" stroke="${stroke}" stroke-width="5" />
-        <path d="M67 28 C70 20 76 22 75 30 C79 21 85 27 81 35 C86 33 88 41 82 43" fill="${comb}" />
-        <polygon points="79,45 91,49 79,53" fill="#eead38" />
-        <circle cx="69" cy="42" r="2.6" fill="#251914" />
-        <path d="M31 55 C22 47 22 38 33 38" fill="${fill}" stroke="${stroke}" stroke-width="5" stroke-linecap="round" />
-        <path d="M42 77 L40 92 M56 77 L54 92" stroke="#cf8a30" stroke-width="5" stroke-linecap="round" />
-      </svg>
-    `;
-  }
-
-  if (level === 3) {
-    return `
-      <svg viewBox="0 0 100 100" aria-hidden="true">
-        <ellipse cx="45" cy="58" rx="28" ry="24" fill="${fill}" stroke="${stroke}" stroke-width="6" />
-        <circle cx="72" cy="41" r="14" fill="${fill}" stroke="${stroke}" stroke-width="6" />
-        <path d="M69 24 C73 14 81 18 79 29 C84 16 92 24 88 34 C95 31 97 42 89 45" fill="${comb}" />
-        <polygon points="82,42 95,47 82,52" fill="#efb245" />
-        <circle cx="72" cy="39" r="2.8" fill="#221612" />
-        <path d="M25 56 C14 48 14 35 29 34" fill="${fill}" stroke="${stroke}" stroke-width="6" stroke-linecap="round" />
-        <path d="M42 80 L40 95 M58 80 L56 95" stroke="#d58f33" stroke-width="5" stroke-linecap="round" />
-      </svg>
-    `;
-  }
-
-  if (level === 4) {
-    return `
-      <svg viewBox="0 0 100 100" aria-hidden="true">
-        <ellipse cx="45" cy="59" rx="28" ry="24" fill="${fill}" stroke="${stroke}" stroke-width="6" />
-        <circle cx="72" cy="41" r="14" fill="${fill}" stroke="${stroke}" stroke-width="6" />
-        <path d="M71 20 L78 13 L85 20 L91 13 L95 25 L83 28 Z" fill="#f7d159" stroke="#d4a537" stroke-width="3" />
-        <path d="M67 27 C70 18 77 19 78 28 C82 20 88 24 86 34 C92 31 94 40 88 43" fill="${comb}" />
-        <polygon points="82,42 95,47 82,52" fill="#f0b84a" />
-        <circle cx="72" cy="39" r="2.8" fill="#221612" />
-        <path d="M23 59 C13 52 13 38 29 36" fill="${fill}" stroke="${stroke}" stroke-width="6" stroke-linecap="round" />
-        <path d="M42 80 L40 95 M58 80 L56 95" stroke="#d58f33" stroke-width="5" stroke-linecap="round" />
-      </svg>
-    `;
-  }
+function animalActor(item) {
+  const stage = getStage(item.level);
+  const color = getColor(item.colorKey);
+  const selectedClass = state.selectedId === item.id ? ' coop__animal--selected' : '';
+  const stillClass = item.level === 0 ? ' coop__animal--egg' : ' coop__animal--walker';
+  const size = Math.min(92 + item.level * 8, 132);
+  const flipClass = item.vx < 0 ? ' coop__animal--left' : '';
+  const age = Math.max(0, performance.now() - item.bornAt);
+  const spawnClass = age < 500 ? ' coop__animal--fresh' : '';
 
   return `
-    <svg viewBox="0 0 100 100" aria-hidden="true">
-      <ellipse cx="45" cy="59" rx="28" ry="24" fill="${fill}" stroke="${stroke}" stroke-width="6" />
-      <circle cx="72" cy="41" r="14" fill="${fill}" stroke="${stroke}" stroke-width="6" />
-      <path d="M70 23 C73 12 81 15 81 27 C86 18 93 24 91 34 C96 31 97 39 90 43" fill="${comb}" />
-      <polygon points="82,42 95,47 82,52" fill="#f0b84a" />
-      <circle cx="72" cy="39" r="2.8" fill="#221612" />
-      <path d="M21 61 C12 52 13 38 29 36" fill="${fill}" stroke="${stroke}" stroke-width="6" stroke-linecap="round" />
-      <path d="M39 20 C48 8 63 8 72 20" fill="none" stroke="#a7b4c7" stroke-width="6" stroke-linecap="round" />
-      <path d="M42 80 L40 95 M58 80 L56 95" stroke="#d58f33" stroke-width="5" stroke-linecap="round" />
+    <button
+      class="coop__animal${selectedClass}${stillClass}${flipClass} ${spawnClass}"
+      type="button"
+      data-animal-id="${item.id}"
+      style="left:${item.x}%; top:${item.y}%; --actor-size:${size}px;"
+      aria-label="${getStage(item.level).label} ${color.label}"
+    >
+      <span
+        class="coop__token"
+        style="--sprite-image:url('${stage.sprite}'); --sprite-row:${spriteRowPosition(color)};"
+        aria-hidden="true"
+      ></span>
+      <span class="coop__meta">${stage.label} · ${color.label}</span>
+      <span class="coop__badge">${stage.badge}</span>
+    </button>
+  `;
+}
+
+function ropeMarkup() {
+  if (!state.rope) {
+    return '';
+  }
+
+  const { from, to, valid } = state.rope;
+  return `
+    <svg class="rope-layer" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+      <line
+        class="rope-layer__shadow"
+        x1="${from.x}"
+        y1="${from.y}"
+        x2="${to.x}"
+        y2="${to.y}"
+      />
+      <line
+        class="rope-layer__line ${valid ? 'rope-layer__line--valid' : 'rope-layer__line--invalid'}"
+        x1="${from.x}"
+        y1="${from.y}"
+        x2="${to.x}"
+        y2="${to.y}"
+      />
     </svg>
   `;
 }
 
-function animalCard(item) {
-  const stage = getStage(item.level);
-  const color = getColor(item.colorKey);
-  const selectedClass = state.selectedId === item.id ? ' coop__animal--selected' : '';
+function mergeEffectsMarkup() {
+  return state.effects
+    .map((effect) => {
+      const color = getColor(effect.colorKey);
+      return `
+        <div
+          class="merge-burst"
+          style="left:${effect.x}%; top:${effect.y}%; --burst:${color.shell}; --burst-line:${color.stroke};"
+          aria-hidden="true"
+        >
+          <span>${effect.label}</span>
+        </div>
+      `;
+    })
+    .join('');
+}
 
+function progressMarkup() {
   return `
-    <button class="coop__animal${selectedClass}" type="button" data-animal-id="${item.id}">
-      <span class="coop__token" style="--token-accent:${stage.accent}; --shell:${color.shell}; --stroke:${color.stroke}; --comb:${color.comb};">
-        ${stageMarkup(item.level, color)}
-      </span>
-      <span class="coop__meta">
-        <strong>${stage.label}</strong>
-        <span>${color.label}</span>
-      </span>
-      <span class="coop__badge">${stage.badge}</span>
-    </button>
+    <div class="progress-line">
+      ${EVOLUTION_CHAIN.map((stage, index) => {
+        const reachedClass = index <= state.bestStage ? ' progress-line__step--reached' : '';
+        return `
+          <span class="progress-line__step${reachedClass}" title="${stage.label}">
+            <span>${stage.badge}</span>
+          </span>
+        `;
+      }).join('')}
+    </div>
   `;
 }
 
@@ -624,7 +880,10 @@ function gameScreen() {
             <span class="barn__capacity">${mode?.cap === Infinity ? 'Sin limite' : `${state.items.length}/${mode?.cap}`}</span>
           </div>
           <div class="${boardClass}">
-            ${state.items.map((item) => animalCard(item)).join('')}
+            <div class="coop__ground"></div>
+            ${ropeMarkup()}
+            ${state.items.map((item) => animalActor(item)).join('')}
+            ${mergeEffectsMarkup()}
           </div>
           ${
             state.fox
@@ -635,7 +894,7 @@ function gameScreen() {
                   data-action="scare-fox"
                   style="top:${state.fox.top}%;left:${state.fox.left}%"
                 >
-                  <img src="${foxSprite}" alt="Zorro en el establo" />
+                  <span class="fox-alert__sprite" style="--fox-image:url('${foxRunSheet}')" aria-hidden="true"></span>
                   <span>Espantar</span>
                 </button>
               `
